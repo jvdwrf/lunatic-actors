@@ -23,12 +23,7 @@ impl<M> Msg<M>
 where
     M: Serialize,
 {
-    pub fn data(&self) -> &M {
-        match self {
-            Msg::Cast(data) => data,
-            Msg::Call(data) => data,
-        }
-    }
+
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -60,7 +55,6 @@ where
         self.0.data()
     }
 
-    println!("{:?}", pid.call(MyMessage::Count));
     pub fn reply(self, reply: Reply<R>) {
         self.0.reply(reply);
     }
@@ -128,7 +122,7 @@ where
 
 pub trait GenServer<M, R>
 where
-    M: Serialize + DeserializeOwned,
+    M: Serialize + DeserializeOwned + Clone,
     R: Serialize + DeserializeOwned,
     Self: Sized + Serialize + DeserializeOwned,
 {
@@ -140,7 +134,7 @@ where
 
     fn handle_cast(&mut self, data: &M);
 
-    fn start(self) -> Pid<M, R> {
+    fn start(mut self) -> Pid<M, R> {
         self = self.init();
 
         let process = process::spawn_with(self, Self::start_loop).unwrap();
@@ -155,13 +149,14 @@ where
             let request = mailbox.receive();
 
             match request.msg() {
-                Msg::Cast(data) => {
+                Msg::Call(data) => {
                     let reply = self.handle_call(data);
                     request.reply(reply);
                 }
-                Msg::Call(data) => {
+                Msg::Cast(data) => {
+                    let data = data.clone();
                     request.reply(Reply::NoReply);
-                    self.handle_cast(data);
+                    self.handle_cast(&data);
                 }
             }
         }

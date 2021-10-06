@@ -45,7 +45,7 @@ struct MyActor {
     count: u32,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 enum MyMessage {
     Ping,
     Count,
