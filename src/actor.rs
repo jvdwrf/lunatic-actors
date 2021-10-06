@@ -1,6 +1,9 @@
 use std::intrinsics::transmute;
 
-use lunatic::{Mailbox, Request, process::{self, Process}};
+use lunatic::{
+    process::{self, Process},
+    Mailbox, Request,
+};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 //-------------------------------------
@@ -8,29 +11,22 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 //-------------------------------------
 
 #[derive(Serialize, Deserialize)]
-pub struct Msg<M>
+pub enum Msg<M>
 where
     M: Serialize,
 {
-    to_reply: bool,
-    data: M,
+    Cast(M),
+    Call(M),
 }
 
 impl<M> Msg<M>
 where
     M: Serialize,
 {
-    pub fn new_cast(data: M) -> Self {
-        Msg {
-            to_reply: false,
-            data,
-        }
-    }
-
-    pub fn new_call(data: M) -> Self {
-        Msg {
-            to_reply: true,
-            data,
+    pub fn data(&self) -> &M {
+        match self {
+            Msg::Cast(data) => data,
+            Msg::Call(data) => data,
         }
     }
 }
@@ -57,15 +53,11 @@ pub struct MyRequest<M: Serialize + DeserializeOwned, R: Serialize + Deserialize
 
 impl<M, R> MyRequest<M, R>
 where
-    M: Serialize + DeserializeOwned + Clone,
+    M: Serialize + DeserializeOwned,
     R: Serialize + DeserializeOwned,
 {
-    pub fn data(&self) -> M {
-        self.0.data().data.clone()
-    }
-
-    pub fn to_reply(&self) -> bool {
-        self.0.data().to_reply
+    pub(crate) fn msg(&self) -> &Msg<M> {
+        self.0.data()
     }
 
     println!("{:?}", pid.call(MyMessage::Count));
@@ -84,7 +76,7 @@ pub struct MyMailbox<M: Serialize + DeserializeOwned, R: Serialize + Deserialize
 
 impl<M, R> MyMailbox<M, R>
 where
-    M: Serialize + DeserializeOwned + Clone,
+    M: Serialize + DeserializeOwned,
     R: Serialize + DeserializeOwned,
 {
     pub(crate) fn receive(&self) -> MyRequest<M, R> {
@@ -92,7 +84,7 @@ where
     }
 
     pub(crate) fn new(mailbox: Mailbox<MyRequest<M, R>>) -> Self {
-        unsafe{ transmute(mailbox) }
+        unsafe { transmute(mailbox) }
     }
 }
 
@@ -106,17 +98,15 @@ pub struct Pid<M: Serialize + DeserializeOwned, R: Serialize + DeserializeOwned>
 
 impl<M, R> Pid<M, R>
 where
-    M: Serialize + DeserializeOwned + Clone,
+    M: Serialize + DeserializeOwned,
     R: Serialize + DeserializeOwned,
 {
     pub fn cast(&self, data: M) {
-        let msg = Msg::new_cast(data);
-        let _unused_reply = self.request(msg);
+        let _unused_reply = self.request(Msg::Cast(data));
     }
 
     pub fn call(&self, data: M) -> Reply<R> {
-        let msg = Msg::new_call(data);
-        self.request(msg)
+        self.request(Msg::Call(data))
     }
 
     fn request(&self, msg: Msg<M>) -> Reply<R> {
@@ -138,47 +128,42 @@ where
 
 pub trait GenServer<M, R>
 where
-    M: Serialize + DeserializeOwned + Clone,
+    M: Serialize + DeserializeOwned,
     R: Serialize + DeserializeOwned,
-    Self: Sized + Serialize + DeserializeOwned
+    Self: Sized + Serialize + DeserializeOwned,
 {
     fn init(self) -> Self {
         self
     }
 
-    fn handle_call(&mut self, data: M) -> Reply<R>;
+    fn handle_call(&mut self, data: &M) -> Reply<R>;
 
-    fn handle_cast(&mut self, data: M);
+    fn handle_cast(&mut self, data: &M);
 
     fn start(self) -> Pid<M, R> {
-        let gen_server = self.init();
+        self = self.init();
 
-        let process = process::spawn_with(gen_server, Self::start_loop).unwrap();
+        let process = process::spawn_with(self, Self::start_loop).unwrap();
 
-        let pid = Pid::new(process);
-
-        pid
+        Pid::new(process)
     }
 
     fn start_loop(mut self, mailbox: Mailbox<MyRequest<M, R>>) {
         let mailbox = MyMailbox::new(mailbox);
 
         loop {
-            let msg = mailbox.receive();
+            let request = mailbox.receive();
 
-            match msg.to_reply() {
-                true => {
-                    let reply = self.handle_call(msg.data());
-                    msg.reply(reply);
-                },
-                false => {
-                    let data = msg.data();
-                    msg.reply(Reply::NoReply);
+            match request.msg() {
+                Msg::Cast(data) => {
+                    let reply = self.handle_call(data);
+                    request.reply(reply);
+                }
+                Msg::Call(data) => {
+                    request.reply(Reply::NoReply);
                     self.handle_cast(data);
-                },
+                }
             }
-
-
         }
     }
 }
