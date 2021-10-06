@@ -1,4 +1,4 @@
-use actor::GenServer;
+use actor::{Context, GenServer};
 use lunatic::Mailbox;
 use serde::{Deserialize, Serialize};
 
@@ -52,14 +52,14 @@ enum MyMessage {
     Invalid,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 enum MyReply {
     Pong,
     Count(u32),
 }
 
 impl GenServer<MyMessage, MyReply> for MyActor {
-    fn handle_call(&mut self, data: &MyMessage) -> actor::Reply<MyReply> {
+    fn handle_call(&mut self, data: &MyMessage, _ctx: &mut Context<MyMessage, MyReply>) -> actor::Reply<MyReply> {
         match data {
             MyMessage::Ping => {
                 self.count += 1;
@@ -70,7 +70,7 @@ impl GenServer<MyMessage, MyReply> for MyActor {
         }
     }
 
-    fn handle_cast(&mut self, data: &MyMessage) {
+    fn handle_cast(&mut self, data: &MyMessage, _ctx: &mut Context<MyMessage, MyReply>) {
         match data {
             MyMessage::Ping => self.count += 1,
             _ => (),

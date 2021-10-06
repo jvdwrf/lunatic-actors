@@ -61,14 +61,14 @@ where
 }
 
 //-------------------------------------
-// MyMailbox
+// Context
 //-------------------------------------
 
-pub struct MyMailbox<M: Serialize + DeserializeOwned, R: Serialize + DeserializeOwned>(
+pub struct Context<M: Serialize + DeserializeOwned, R: Serialize + DeserializeOwned>(
     Mailbox<MyRequest<M, R>>,
 );
 
-impl<M, R> MyMailbox<M, R>
+impl<M, R> Context<M, R>
 where
     M: Serialize + DeserializeOwned,
     R: Serialize + DeserializeOwned,
@@ -130,9 +130,9 @@ where
         self
     }
 
-    fn handle_call(&mut self, data: &M) -> Reply<R>;
+    fn handle_call(&mut self, data: &M, ctx: &mut Context<M, R>) -> Reply<R>;
 
-    fn handle_cast(&mut self, data: &M);
+    fn handle_cast(&mut self, data: &M, ctx: &mut Context<M, R>);
 
     fn start(mut self) -> Pid<M, R> {
         self = self.init();
@@ -143,20 +143,20 @@ where
     }
 
     fn start_loop(mut self, mailbox: Mailbox<MyRequest<M, R>>) {
-        let mailbox = MyMailbox::new(mailbox);
+        let mut ctx = Context::new(mailbox);
 
         loop {
-            let request = mailbox.receive();
+            let request = ctx.receive();
 
             match request.msg() {
                 Msg::Call(data) => {
-                    let reply = self.handle_call(data);
+                    let reply = self.handle_call(data, &mut ctx);
                     request.reply(reply);
                 }
                 Msg::Cast(data) => {
                     let data = data.clone();
                     request.reply(Reply::NoReply);
-                    self.handle_cast(&data);
+                    self.handle_cast(&data, &mut ctx);
                 }
             }
         }
