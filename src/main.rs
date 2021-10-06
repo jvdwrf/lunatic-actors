@@ -1,8 +1,8 @@
-use actor::{Context, GenServer};
+use actor::{Handle, Reply};
 use lunatic::Mailbox;
 use serde::{Deserialize, Serialize};
 
-use crate::actor::Reply;
+use crate::actor::GenServer;
 
 mod actor;
 
@@ -13,7 +13,7 @@ fn main(_mailbox: Mailbox<String>) {
 
 fn test() {
     let my_actor = MyActor { count: 0 };
-    let pid = my_actor.start();
+    let pid = GenServer::new(my_actor).start();
 
     // casting 5 times with a ping
     // calling count should increment by 1 every time
@@ -58,8 +58,8 @@ enum MyReply {
     Count(u32),
 }
 
-impl GenServer<MyMessage, MyReply> for MyActor {
-    fn handle_call(&mut self, data: &MyMessage, _ctx: &mut Context<MyMessage, MyReply>) -> actor::Reply<MyReply> {
+impl Handle<MyMessage, MyReply> for MyActor {
+    fn handle_call(&mut self, data: &MyMessage, ctx: &mut actor::Context<MyMessage, MyReply>) -> actor::Reply<MyReply> {
         match data {
             MyMessage::Ping => {
                 self.count += 1;
@@ -70,7 +70,7 @@ impl GenServer<MyMessage, MyReply> for MyActor {
         }
     }
 
-    fn handle_cast(&mut self, data: &MyMessage, _ctx: &mut Context<MyMessage, MyReply>) {
+    fn handle_cast(&mut self, data: &MyMessage, ctx: &mut actor::Context<MyMessage, MyReply>) {
         match data {
             MyMessage::Ping => self.count += 1,
             _ => (),

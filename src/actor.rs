@@ -1,4 +1,4 @@
-use std::intrinsics::transmute;
+use std::{intrinsics::transmute, marker::PhantomData};
 
 use lunatic::{
     process::{self, Process},
@@ -19,12 +19,7 @@ where
     Call(M),
 }
 
-impl<M> Msg<M>
-where
-    M: Serialize,
-{
-
-}
+impl<M> Msg<M> where M: Serialize {}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Reply<R>
@@ -117,46 +112,82 @@ where
 }
 
 //-------------------------------------
-// GenServer
+// GenServer Trait
 //-------------------------------------
 
-pub trait GenServer<M, R>
+pub trait Handle<M, R>
 where
     M: Serialize + DeserializeOwned + Clone,
     R: Serialize + DeserializeOwned,
-    Self: Sized + Serialize + DeserializeOwned,
+    Self: Sized
 {
-    fn init(self) -> Self {
-        self
-    }
-
     fn handle_call(&mut self, data: &M, ctx: &mut Context<M, R>) -> Reply<R>;
 
     fn handle_cast(&mut self, data: &M, ctx: &mut Context<M, R>);
 
-    fn start(mut self) -> Pid<M, R> {
-        self = self.init();
+    fn after_spawn(self, ctx: Context<M, R>) -> (Self, Context<M, R>) {
+        (self, ctx)
+    }
+
+    fn before_spawn(self) -> Self {
+        self
+    }
+}
+
+//-------------------------------------
+// GenServer
+//-------------------------------------
+
+#[derive(Serialize, Deserialize)]
+pub struct GenServer<T, M, R>
+where
+    T: Handle<M, R>,
+    M: Serialize + DeserializeOwned + Clone,
+    R: Serialize + DeserializeOwned
+{
+    actor: T,
+    m: PhantomData<M>,
+    r: PhantomData<R>,
+}
+
+impl<T, M, R> GenServer<T, M, R>
+where
+    T: Handle<M, R>,
+    M: Serialize + DeserializeOwned + Clone,
+    R: Serialize + DeserializeOwned,
+    Self: Serialize + DeserializeOwned
+{
+    pub fn new(actor: T) -> Self {
+        Self {
+            actor,
+            m: PhantomData,
+            r: PhantomData,
+        }
+    }
+
+    pub fn start(mut self) -> Pid<M, R> {
+        self.actor = self.actor.before_spawn();
 
         let process = process::spawn_with(self, Self::start_loop).unwrap();
 
         Pid::new(process)
     }
 
-    fn start_loop(mut self, mailbox: Mailbox<MyRequest<M, R>>) {
-        let mut ctx = Context::new(mailbox);
+    fn start_loop(self, mailbox: Mailbox<MyRequest<M, R>>) {
+        let (mut gen_server, mut ctx) = self.actor.after_spawn(Context::new(mailbox));
 
         loop {
             let request = ctx.receive();
 
             match request.msg() {
                 Msg::Call(data) => {
-                    let reply = self.handle_call(data, &mut ctx);
+                    let reply = gen_server.handle_call(data, &mut ctx);
                     request.reply(reply);
                 }
                 Msg::Cast(data) => {
                     let data = data.clone();
                     request.reply(Reply::NoReply);
-                    self.handle_cast(&data, &mut ctx);
+                    gen_server.handle_cast(&data, &mut ctx);
                 }
             }
         }
